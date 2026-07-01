@@ -44,6 +44,12 @@ class ApiClient:
         )
         return self.request_json("GET", f"/devices?{params}")
 
+    def get_device_detail(self, device_id: str) -> dict:
+        return self.request_json("GET", f"/devices/{device_id}")
+
+    def get_device_logs(self, device_id: str) -> dict:
+        return self.request_json("GET", f"/devices/{device_id}/logs")
+
     def create_device(self, payload: dict) -> dict:
         return self.request_json("POST", "/devices", payload)
 

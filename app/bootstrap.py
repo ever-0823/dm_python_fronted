@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
@@ -56,7 +57,10 @@ def bootstrap() -> None:
 
 
 def load_stylesheet() -> str:
-    return """
+    # 为分页下拉框提供稳定可见的本地图标，避免系统默认箭头被样式覆盖后消失。
+    pagination_arrow = (Path(__file__).resolve().parent / "ui" / "assets" / "chevron-down.svg").as_posix()
+    # 将下拉框视觉升级为全局标准样式，后续新增页面时可以直接复用这一套企业风格。
+    stylesheet = """
     QWidget {
         background-color: #f3f6fb;
         color: #1f2937;
@@ -73,6 +77,9 @@ def load_stylesheet() -> str:
     }
     QFrame#Sidebar {
         border-right: 1px solid #e5e7eb;
+    }
+    QLabel {
+    background-color: transparent;
     }
     QLabel#AppTitle {
         font-size: 22px;
@@ -119,6 +126,35 @@ def load_stylesheet() -> str:
         color: #1f4e79;
         border: 1px solid #d6e2ef;
     }
+    QPushButton[pagination="true"] {
+        background-color: transparent;
+        color: #374151;
+        border: none;
+        min-width: 26px;
+        padding: 4px 5px;
+        border-radius: 6px;
+        font-size: 13px;
+    }
+    QPushButton[pagination="true"][active="true"] {
+        color: #3b82f6;
+        font-weight: 700;
+    }
+    QPushButton[paginationNav="true"] {
+        background-color: transparent;
+        color: #6b7280;
+        border: none;
+        min-width: 20px;
+        padding: 4px 2px;
+        font-size: 15px;
+    }
+    QPushButton[paginationNav="true"]:hover {
+        color: #1f4e79;
+        background-color: transparent;
+    }
+    QPushButton[paginationNav="true"]:disabled {
+        color: #cbd5e1;
+        background-color: transparent;
+    }
     QPushButton[compact="true"] {
         padding: 4px 10px;
         min-height: 14px;
@@ -128,15 +164,69 @@ def load_stylesheet() -> str:
     QPushButton[variant="danger"] {
         background-color: #c2410c;
     }
-    QLineEdit, QComboBox {
+    QLineEdit {
         background-color: #ffffff;
         border: 1px solid #d1d5db;
         border-radius: 8px;
         padding: 8px 10px;
         min-height: 18px;
     }
-    QLineEdit:focus, QComboBox:focus {
+    QLineEdit:focus {
         border: 1px solid #1f4e79;
+    }
+    QComboBox {
+        background-color: #ffffff;
+        border: 1px solid #d9e0ea;
+        border-radius: 6px;
+        min-height: 18px;
+        padding: 6px 34px 6px 14px;
+        color: #6b7280;
+    }
+    QComboBox:hover {
+        border: 1px solid #cfd8e3;
+        background-color: #ffffff;
+    }
+    QComboBox:on {
+        border: 1px solid #cfd8e3;
+        background-color: #ffffff;
+    }
+    QComboBox:focus {
+        border: 1px solid #93c5fd;
+    }
+    QComboBox::drop-down {
+        width: 30px;
+        border: none;
+        background-color: transparent;
+        subcontrol-origin: padding;
+        subcontrol-position: top right;
+    }
+    QComboBox::down-arrow {
+        width: 12px;
+        height: 12px;
+        image: url(__PAGINATION_ARROW__);
+    }
+    QComboBox QAbstractItemView {
+        background-color: #ffffff;
+        color: #4b5563;
+        border: 1px solid #d9e0ea;
+        border-radius: 8px;
+        outline: 0;
+        padding: 4px;
+        selection-background-color: #f3f6fb;
+        selection-color: #374151;
+    }
+    QSpinBox#PaginationJumpSpin {
+        background-color: #ffffff;
+        border: 1px solid #d9e0ea;
+        border-radius: 6px;
+        min-height: 18px;
+        padding: 6px 8px;
+    }
+    QSpinBox#PaginationJumpSpin {
+        color: #6b7280;
+    }
+    QSpinBox#PaginationJumpSpin:focus {
+        border: 1px solid #93c5fd;
     }
     QTreeWidget, QTableWidget {
         background-color: #ffffff;
@@ -164,3 +254,4 @@ def load_stylesheet() -> str:
         padding: 8px;
     }
     """
+    return stylesheet.replace("__PAGINATION_ARROW__", pagination_arrow)

@@ -14,6 +14,7 @@ from app.application.controllers.auth_controller import AuthController
 from app.infrastructure.config import AppSettings
 from app.infrastructure.http.api_client import ApiClient, ApiError
 from app.ui.pages.dashboard_page import DashboardPage
+from app.ui.pages.device_detail_page import DeviceDetailPage
 from app.ui.pages.devices_page import DevicesPage
 from app.ui.pages.placeholder_page import PlaceholderPage
 from app.ui.widgets.sidebar import Sidebar
@@ -113,9 +114,16 @@ class MainWindow(QMainWindow):
         root.addWidget(status_bar)
 
     def _build_pages(self) -> None:
+        devices_page = DevicesPage(self.api_client)
+        devices_page.detail_requested.connect(self.open_device_detail)
+
+        device_detail_page = DeviceDetailPage(self.api_client)
+        device_detail_page.back_requested.connect(self.open_devices_page)
+
         page_definitions = {
             "dashboard": DashboardPage(self.api_client),
-            "devices": DevicesPage(self.api_client),
+            "devices": devices_page,
+            "device_detail": device_detail_page,
             "new_device": PlaceholderPage("新建设备", "下一步我们会把新建设备弹窗接到这个入口上。"),
             "device_logs": PlaceholderPage("设备日志", "后续会支持按设备查看操作日志和时间线。"),
             "attachments": PlaceholderPage("附件管理", "后续会在这里集中展示附件上传、下载和删除能力。"),
@@ -138,7 +146,7 @@ class MainWindow(QMainWindow):
         hint = self._page_hint(page_key)
         self.page_hint.setText(hint)
         self.page_hint.setVisible(bool(hint))
-        self.page_header.setVisible(page_key != "devices")
+        self.page_header.setVisible(page_key not in {"devices", "device_detail"})
 
     def handle_logout(self) -> None:
         try:
@@ -159,6 +167,17 @@ class MainWindow(QMainWindow):
         except ApiError as exc:
             self.user_label.setText("当前用户：获取失败")
             self.status_label.setText(str(exc))
+
+    def open_device_detail(self, device_id: str) -> None:
+        detail_page = self.page_map.get("device_detail")
+        if detail_page is None:
+            return
+        detail_page.load_device(device_id)
+        self.pages.setCurrentWidget(detail_page)
+        self.page_header.setVisible(False)
+
+    def open_devices_page(self) -> None:
+        self.switch_page("devices", "设备列表")
 
     def _page_hint(self, page_key: str) -> str:
         hints = {

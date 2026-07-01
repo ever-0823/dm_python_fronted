@@ -32,6 +32,8 @@ class DeviceFormDialog(QDialog):
         self.location_input = QLineEdit()
 
         self.status_input = QComboBox()
+        # 弹窗内状态下拉框沿用统一标准高度，避免和其他表单控件观感割裂。
+        self.status_input.setFixedHeight(34)
         self.status_input.addItem("启用中", "active")
         self.status_input.addItem("维护中", "maintenance")
         self.status_input.addItem("已停用", "inactive")
