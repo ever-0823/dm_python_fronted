@@ -75,6 +75,11 @@ def load_stylesheet() -> str:
         border: 1px solid #e5e7eb;
         border-radius: 12px;
     }
+    QFrame#AttachmentDropZone {
+        background-color: #f8fbff;
+        border: 1px dashed #bfd0e2;
+        border-radius: 10px;
+    }
     QFrame#Sidebar {
         border-right: 1px solid #e5e7eb;
     }

@@ -26,6 +26,7 @@ class SelectAllHeader(QHeaderView):
 
     def __init__(self, parent=None) -> None:
         super().__init__(Qt.Orientation.Horizontal, parent)
+        # 表头复选框放在首列，用于一键勾选或取消当前页全部设备。
         self.checkbox = QCheckBox(self.viewport())
         self.checkbox.stateChanged.connect(self._emit_toggle)
         self.sectionResized.connect(self._update_checkbox_position)
@@ -44,6 +45,7 @@ class SelectAllHeader(QHeaderView):
         self.checkbox.blockSignals(False)
 
     def _update_checkbox_position(self) -> None:
+        # 当表头尺寸变化时重新居中复选框，避免列宽变化后位置跑偏。
         if self.count() == 0:
             return
         section_x = self.sectionViewportPosition(0)
@@ -60,6 +62,7 @@ class DevicesPage(QWidget):
     def __init__(self, api_client: ApiClient) -> None:
         super().__init__()
         self.api_client = api_client
+        # 顶部搜索框：支持按设备编号或名称快速检索。
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("输入设备编号或设备名称")
 
@@ -73,10 +76,12 @@ class DevicesPage(QWidget):
         self.status_filter.addItem("已报废", "retired")
 
         self.table = QTableWidget(0, 8)
+        # 自定义表头承载“全选当前页”的复选框。
         self.header = SelectAllHeader(self.table)
         self.table.setHorizontalHeader(self.header)
         self.header.toggled.connect(self.set_all_rows_checked)
 
+        # 分页区状态：总数、当前页、每页条数和跳页控件都依赖这些成员。
         self.page_hint = QLabel("")
         self.page_hint.setObjectName("PageHint")
         self.page_hint.setVisible(False)
@@ -105,11 +110,13 @@ class DevicesPage(QWidget):
         self.load_devices()
 
     def _build_ui(self) -> None:
+        # 页面采用企业后台常见结构：标题栏、筛选栏、列表表格、底部分页栏。
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(16)
 
         title_row = QHBoxLayout()
+        # 适当增加标题行上边距，让右上角两个操作按钮整体下移一些。
         title_row.setContentsMargins(0, 5, 0, 4)
         title_row.setSpacing(10)
         title_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
@@ -158,6 +165,7 @@ class DevicesPage(QWidget):
         self._configure_table_columns()
         root.addWidget(self.table)
 
+        # 分页栏按参考图收紧布局，尽量保持水平居中和轻量视觉。
         pager_row = QHBoxLayout()
         pager_row.setContentsMargins(0, 8, 0, 2)
         pager_row.setSpacing(14)
@@ -200,6 +208,7 @@ class DevicesPage(QWidget):
         root.addLayout(pager_row)
 
     def reset_filters(self) -> None:
+        # 重置筛选条件后回到第一页，避免旧页码和新结果集不匹配。
         self.search_input.clear()
         self.status_filter.setCurrentIndex(0)
         self.current_page = 1
@@ -207,6 +216,7 @@ class DevicesPage(QWidget):
 
     def load_devices(self) -> None:
         try:
+            # 列表分页、搜索和状态筛选统一由后端接口返回。
             response = self.api_client.get_devices(
                 page=self.current_page,
                 page_size=self.page_size,
@@ -249,6 +259,7 @@ class DevicesPage(QWidget):
             self.page_hint.setVisible(False)
             self._update_pagination_ui()
         except ApiError as exc:
+            # 接口异常时清空当前表格，避免页面保留过期数据造成误导。
             self.table.setRowCount(0)
             self.devices_cache = []
             self.header.set_checked(False)
@@ -259,11 +270,13 @@ class DevicesPage(QWidget):
             self._update_pagination_ui()
 
     def open_create_dialog(self) -> None:
+        # 新建设备成功后刷新当前列表，让新增结果立刻可见。
         dialog = DeviceFormDialog(self.api_client, parent=self)
         dialog.device_saved.connect(self.load_devices)
         dialog.exec()
 
     def open_edit_dialog(self, device: dict) -> None:
+        # 编辑和新建共用同一个弹窗，区别只在于是否传入初始设备数据。
         dialog = DeviceFormDialog(self.api_client, device=device, parent=self)
         dialog.device_saved.connect(self.load_devices)
         dialog.exec()
@@ -274,7 +287,7 @@ class DevicesPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # 复选框
+        # 每行单独保存 device_id，供批量删除时反查具体设备。
         checkbox = QCheckBox()
         container.setStyleSheet("background-color: transparent;")
         checkbox.setStyleSheet("background-color: transparent;")
@@ -290,6 +303,7 @@ class DevicesPage(QWidget):
         layout.setSpacing(6)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+        # 操作列保留轻量文本按钮，减少表格尾列的视觉负担。
         edit_button = QPushButton("编辑")
         edit_button.setCursor(Qt.CursorShape.PointingHandCursor)
         edit_button.setStyleSheet(
@@ -311,6 +325,7 @@ class DevicesPage(QWidget):
         return container
 
     def _configure_table_columns(self) -> None:
+        # 关键字段列宽固定，设备名称列拉伸，兼顾信息密度和可读性。
         header = self.table.horizontalHeader()
         header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
@@ -331,6 +346,7 @@ class DevicesPage(QWidget):
         self.table.setColumnWidth(7, 118)
 
     def set_all_rows_checked(self, checked: bool) -> None:
+        # 表头复选框只控制当前页，不跨页勾选。
         for row_index in range(self.table.rowCount()):
             checkbox = self._get_row_checkbox(row_index)
             if checkbox is not None:
@@ -339,6 +355,7 @@ class DevicesPage(QWidget):
                 checkbox.blockSignals(False)
 
     def sync_header_checkbox(self) -> None:
+        # 当每行复选框变化时，反向同步表头“全选”状态。
         all_checked = self.table.rowCount() > 0 and all(
             checkbox is not None and checkbox.isChecked()
             for checkbox in (self._get_row_checkbox(row_index) for row_index in range(self.table.rowCount()))
@@ -346,6 +363,7 @@ class DevicesPage(QWidget):
         self.header.set_checked(all_checked)
 
     def batch_delete_selected(self) -> None:
+        # 批量删除前先收集当前页所有被勾选的设备对象。
         selected_devices = self._get_selected_devices()
         if not selected_devices:
             QMessageBox.information(self, "未选择设备", "请先勾选要删除的设备。")
@@ -367,6 +385,7 @@ class DevicesPage(QWidget):
             return
 
         try:
+            # 删除成功后立即刷新列表，保持分页区和勾选状态同步。
             response = self.api_client.batch_delete_devices(device_ids)
             data = response.get("data") or {}
             deleted_count = int(data.get("deleted_count") or 0)
@@ -390,6 +409,7 @@ class DevicesPage(QWidget):
             QMessageBox.critical(self, "批量删除失败", str(exc))
 
     def _get_selected_devices(self) -> list[dict]:
+        # 先收集勾选的 device_id，再从缓存中还原完整设备数据。
         selected_ids: list[str] = []
         for row_index in range(self.table.rowCount()):
             checkbox = self._get_row_checkbox(row_index)
@@ -401,29 +421,34 @@ class DevicesPage(QWidget):
         return [device for device in self.devices_cache if str(device.get("device_id", "")) in selected_ids]
 
     def _get_row_checkbox(self, row_index: int) -> QCheckBox | None:
+        # 每个勾选框被包在单元格容器里，需要先拿容器再找复选框。
         container = self.table.cellWidget(row_index, 0)
         if container is None:
             return None
         return container.findChild(QCheckBox)
 
     def change_page_size(self) -> None:
+        # 每页条数变化后重新从第一页加载，避免当前页超出范围。
         self.page_size = int(self.page_size_combo.currentData() or 10)
         self.current_page = 1
         self.load_devices()
 
     def go_prev_page(self) -> None:
+        # 第一页继续点击上一页时直接忽略。
         if self.current_page <= 1:
             return
         self.current_page -= 1
         self.load_devices()
 
     def go_next_page(self) -> None:
+        # 最后一页继续点击下一页时直接忽略。
         if self.total_pages == 0 or self.current_page >= self.total_pages:
             return
         self.current_page += 1
         self.load_devices()
 
     def go_jump_page(self) -> None:
+        # 跳页输入框失焦后触发跳转，适合快速定位到指定页。
         target_page = int(self.jump_page_spin.value())
         if target_page == self.current_page:
             return
@@ -431,12 +456,14 @@ class DevicesPage(QWidget):
         self.load_devices()
 
     def go_to_page(self, target_page: int) -> None:
+        # 页码按钮和跳页输入框最终都走同一套翻页逻辑。
         if target_page < 1 or target_page > self.total_pages or target_page == self.current_page:
             return
         self.current_page = target_page
         self.load_devices()
 
     def _update_pagination_ui(self) -> None:
+        # 根据分页结果动态启用、禁用或隐藏翻页控件。
         if self.total_pages <= 0:
             self.total_label.setText("Total 0")
             self.prev_page_button.setEnabled(False)
@@ -457,6 +484,7 @@ class DevicesPage(QWidget):
         self._update_page_number_buttons()
 
     def _update_page_number_buttons(self) -> None:
+        # 仅显示当前页附近的少量页码，保持分页栏紧凑且易读。
         if self.total_pages <= 0:
             for button in self.page_buttons:
                 button.setVisible(False)
@@ -482,6 +510,7 @@ class DevicesPage(QWidget):
             button.style().polish(button)
 
     def open_detail(self, device: dict) -> None:
+        # 详情页真正的数据加载放在详情页内部，这里只负责发出设备编号。
         device_id = str(device.get("device_id", "") or "")
         if not device_id:
             QMessageBox.warning(self, "无法打开详情", "当前设备缺少设备编号。")
@@ -489,6 +518,7 @@ class DevicesPage(QWidget):
         self.detail_requested.emit(device_id)
 
     def _map_status(self, value: str) -> str:
+        # 接口返回英文状态码，列表里转换成更易读的中文文案。
         status_map = {
             "active": "启用中",
             "maintenance": "维护中",

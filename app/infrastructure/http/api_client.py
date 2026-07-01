@@ -1,4 +1,6 @@
 import json
+import re
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -62,19 +64,106 @@ class ApiClient:
     def batch_delete_devices(self, device_ids: list[str]) -> dict:
         return self.request_json("POST", "/devices/batch-delete", {"device_ids": device_ids})
 
+    def upload_device_attachment(self, device_id: str, file_path: str) -> dict:
+        # 上传附件时手动构造 multipart/form-data，请求体里包含文件名和二进制内容。
+        boundary = "----CodexDeviceUploadBoundary"
+        source_path = Path(file_path)
+        file_bytes = source_path.read_bytes()
+        body = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{source_path.name}"\r\n'
+            "Content-Type: application/octet-stream\r\n\r\n"
+        ).encode("utf-8") + file_bytes + f"\r\n--{boundary}--\r\n".encode("utf-8")
+
+        request = Request(
+            url=f"{self.settings.api_base_url}/devices/{device_id}/upload",
+            data=body,
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                **self._build_auth_headers(),
+            },
+            method="POST",
+        )
+        return self._request_json(request)
+
+    def download_device_attachment(self, device_id: str) -> tuple[bytes, str]:
+        # 下载接口返回文件流，界面层再决定保存到哪个本地路径。
+        request = Request(
+            url=f"{self.settings.api_base_url}/devices/{device_id}/download",
+            headers=self._build_auth_headers(),
+            method="GET",
+        )
+        try:
+            with urlopen(request, timeout=10) as response:
+                content = response.read()
+                filename = self._extract_filename(response.headers.get("Content-Disposition", ""))
+                return content, filename or f"{device_id}_attachment"
+        except HTTPError as exc:
+            message = self._decode_error(exc)
+            raise ApiError(message) from exc
+        except URLError as exc:
+            raise ApiError("无法连接后端服务，请确认 FastAPI 已启动") from exc
+
+    def delete_device_attachment(self, device_id: str) -> dict:
+        # 删除附件复用后端现有接口。
+        return self.request_json("POST", f"/devices/{device_id}/delete")
+
+    def export_devices_csv(self) -> tuple[bytes, str]:
+        # 导出接口直接返回 CSV 文件流，界面层负责让用户选择保存位置。
+        request = Request(
+            url=f"{self.settings.api_base_url}/devices/export",
+            headers=self._build_auth_headers(),
+            method="GET",
+        )
+        try:
+            with urlopen(request, timeout=10) as response:
+                content = response.read()
+                filename = self._extract_filename(response.headers.get("Content-Disposition", ""))
+                return content, filename or "devices.csv"
+        except HTTPError as exc:
+            message = self._decode_error(exc)
+            raise ApiError(message) from exc
+        except URLError as exc:
+            raise ApiError("无法连接后端服务，请确认 FastAPI 已启动") from exc
+
+    def import_devices_csv(self, file_path: str) -> dict:
+        # CSV 导入也走 multipart/form-data，请求体里只携带一个上传文件。
+        boundary = "----CodexDeviceImportBoundary"
+        source_path = Path(file_path)
+        file_bytes = source_path.read_bytes()
+        body = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{source_path.name}"\r\n'
+            "Content-Type: text/csv\r\n\r\n"
+        ).encode("utf-8") + file_bytes + f"\r\n--{boundary}--\r\n".encode("utf-8")
+
+        request = Request(
+            url=f"{self.settings.api_base_url}/devices/import",
+            data=body,
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                **self._build_auth_headers(),
+            },
+            method="POST",
+        )
+        return self._request_json(request)
+
     def request_json(self, method: str, path: str, payload: dict | None = None) -> dict:
         url = f"{self.settings.api_base_url}{path}"
-        headers = {"Content-Type": "application/json"}
-
-        token = self.token_store.get_token()
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+        headers = {
+            "Content-Type": "application/json",
+            **self._build_auth_headers(),
+        }
 
         body = None
         if payload is not None:
             body = json.dumps(payload).encode("utf-8")
 
         request = Request(url=url, data=body, headers=headers, method=method)
+        return self._request_json(request)
+
+    def _request_json(self, request: Request) -> dict:
+        # 所有 JSON 接口统一走这里，保持鉴权和错误处理方式一致。
         try:
             with urlopen(request, timeout=10) as response:
                 content = response.read().decode("utf-8")
@@ -84,6 +173,13 @@ class ApiClient:
             raise ApiError(message) from exc
         except URLError as exc:
             raise ApiError("无法连接后端服务，请确认 FastAPI 已启动") from exc
+
+    def _build_auth_headers(self) -> dict[str, str]:
+        # 需要登录态的请求统一补 Authorization 头，避免各接口重复拼接。
+        token = self.token_store.get_token()
+        if not token:
+            return {}
+        return {"Authorization": f"Bearer {token}"}
 
     def _decode_payload(self, content: str) -> dict:
         try:
@@ -105,3 +201,8 @@ class ApiClient:
         except Exception:
             pass
         return f"请求失败：{exc.code}"
+
+    def _extract_filename(self, content_disposition: str) -> str:
+        # 从响应头里解析下载文件名，解析不到时交给调用方使用默认名。
+        match = re.search(r'filename="?([^";]+)"?', content_disposition)
+        return match.group(1) if match else ""

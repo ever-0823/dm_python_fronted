@@ -16,6 +16,7 @@ from app.infrastructure.http.api_client import ApiClient, ApiError
 from app.ui.pages.dashboard_page import DashboardPage
 from app.ui.pages.device_detail_page import DeviceDetailPage
 from app.ui.pages.devices_page import DevicesPage
+from app.ui.pages.import_export_page import ImportExportPage
 from app.ui.pages.placeholder_page import PlaceholderPage
 from app.ui.widgets.sidebar import Sidebar
 
@@ -37,9 +38,11 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel(f"服务地址：{settings.api_base_url}")
 
         self.sidebar = Sidebar()
+        # 侧边栏菜单树选中项变化后，统一由主窗口来完成页面切换。
         self.sidebar.page_selected.connect(self.switch_page)
 
         self.pages = QStackedWidget()
+        # 页面映射表负责把菜单 key 和真实页面组件关联起来。
         self.page_map = {}
 
         self._build_ui()
@@ -127,13 +130,15 @@ class MainWindow(QMainWindow):
             "new_device": PlaceholderPage("新建设备", "下一步我们会把新建设备弹窗接到这个入口上。"),
             "device_logs": PlaceholderPage("设备日志", "后续会支持按设备查看操作日志和时间线。"),
             "attachments": PlaceholderPage("附件管理", "后续会在这里集中展示附件上传、下载和删除能力。"),
-            "import_export": PlaceholderPage("数据导入导出", "下一步可以把 CSV 导入导出页面接上。"),
+            # 导入导出页使用正式功能页，替换原来的占位提示。
+            "import_export": ImportExportPage(self.api_client),
             "profile": PlaceholderPage("当前用户", "后续这里会展示 auth/me 返回的完整用户信息。"),
             "users": PlaceholderPage("用户列表", "后续这里会展示用户列表和角色信息。"),
             "system": PlaceholderPage("服务状态", "后续这里会接健康检查和数据库连通检查。"),
         }
 
         for key, widget in page_definitions.items():
+            # 所有页面统一注册到同一个容器中，切页时只切换当前可见项。
             self.page_map[key] = widget
             self.pages.addWidget(widget)
 
@@ -141,6 +146,7 @@ class MainWindow(QMainWindow):
         widget = self.page_map.get(page_key)
         if widget is None:
             return
+        # 同步切换页面内容、标题和说明文案，保持头部信息一致。
         self.pages.setCurrentWidget(widget)
         self.page_title.setText(title)
         hint = self._page_hint(page_key)
@@ -186,7 +192,7 @@ class MainWindow(QMainWindow):
             "new_device": "这里预留给新建设备流程。",
             "device_logs": "这里预留给操作日志查询与审计展示。",
             "attachments": "这里预留给附件的集中管理。",
-            "import_export": "这里预留给 CSV 导入导出。",
+            "import_export": "",
             "profile": "这里预留给当前登录用户信息展示。",
             "users": "这里预留给用户列表与角色信息。",
             "system": "这里预留给服务与数据库状态监控。",
