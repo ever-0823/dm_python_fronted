@@ -14,6 +14,7 @@ from app.application.controllers.auth_controller import AuthController
 from app.infrastructure.config import AppSettings
 from app.infrastructure.http.api_client import ApiClient, ApiError
 from app.ui.pages.dashboard_page import DashboardPage
+from app.ui.pages.current_user_page import CurrentUserPage
 from app.ui.pages.device_detail_page import DeviceDetailPage
 from app.ui.pages.devices_page import DevicesPage
 from app.ui.pages.import_export_page import ImportExportPage
@@ -122,6 +123,9 @@ class MainWindow(QMainWindow):
 
         device_detail_page = DeviceDetailPage(self.api_client)
         device_detail_page.back_requested.connect(self.open_devices_page)
+        profile_page = CurrentUserPage(self.settings, self.api_client)
+        # 编辑资料后同步刷新顶部用户信息，避免页头保留旧用户名。
+        profile_page.profile_updated.connect(self._refresh_user_info)
 
         page_definitions = {
             "dashboard": DashboardPage(self.api_client),
@@ -132,7 +136,7 @@ class MainWindow(QMainWindow):
             "attachments": PlaceholderPage("附件管理", "后续会在这里集中展示附件上传、下载和删除能力。"),
             # 导入导出页使用正式功能页，替换原来的占位提示。
             "import_export": ImportExportPage(self.api_client),
-            "profile": PlaceholderPage("当前用户", "后续这里会展示 auth/me 返回的完整用户信息。"),
+            "profile": profile_page,
             "users": PlaceholderPage("用户列表", "后续这里会展示用户列表和角色信息。"),
             "system": PlaceholderPage("服务状态", "后续这里会接健康检查和数据库连通检查。"),
         }

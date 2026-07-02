@@ -32,6 +32,20 @@ class ApiClient:
     def get_current_user(self) -> dict:
         return self.request_json("GET", "/auth/me")
 
+    def update_profile(self, username: str) -> dict:
+        # 编辑资料当前只支持用户名，接口保持最小请求体。
+        return self.request_json("PUT", "/auth/profile", {"username": username})
+
+    def change_password(self, current_password: str, new_password: str) -> dict:
+        return self.request_json(
+            "POST",
+            "/auth/change-password",
+            {
+                "current_password": current_password,
+                "new_password": new_password,
+            },
+        )
+
     def get_device_statistics(self) -> dict:
         return self.request_json("GET", "/devices/statistics")
 
