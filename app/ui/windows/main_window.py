@@ -1,9 +1,9 @@
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
-    QMessageBox,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
@@ -13,16 +13,20 @@ from PySide6.QtWidgets import (
 from app.application.controllers.auth_controller import AuthController
 from app.infrastructure.config import AppSettings
 from app.infrastructure.http.api_client import ApiClient, ApiError
+from app.ui.dialogs.message_box import AppMessageBox as QMessageBox
 from app.ui.pages.dashboard_page import DashboardPage
 from app.ui.pages.current_user_page import CurrentUserPage
 from app.ui.pages.device_detail_page import DeviceDetailPage
 from app.ui.pages.devices_page import DevicesPage
 from app.ui.pages.import_export_page import ImportExportPage
+from app.ui.pages.ocr_page import OcrPage
 from app.ui.pages.placeholder_page import PlaceholderPage
 from app.ui.widgets.sidebar import Sidebar
 
 
 class MainWindow(QMainWindow):
+    logout_completed = Signal()
+
     def __init__(self, settings: AppSettings, api_client: ApiClient, auth_controller: AuthController) -> None:
         super().__init__()
         self.settings = settings
@@ -131,9 +135,10 @@ class MainWindow(QMainWindow):
             "dashboard": DashboardPage(self.api_client),
             "devices": devices_page,
             "device_detail": device_detail_page,
-            "new_device": PlaceholderPage("新建设备", "下一步我们会把新建设备弹窗接到这个入口上。"),
             "device_logs": PlaceholderPage("设备日志", "后续会支持按设备查看操作日志和时间线。"),
             "attachments": PlaceholderPage("附件管理", "后续会在这里集中展示附件上传、下载和删除能力。"),
+            # 图片文字识别页直接调用本地 PP-OCRv6 后端接口。
+            "ocr": OcrPage(self.api_client),
             # 导入导出页使用正式功能页，替换原来的占位提示。
             "import_export": ImportExportPage(self.api_client),
             "profile": profile_page,
@@ -147,6 +152,12 @@ class MainWindow(QMainWindow):
             self.pages.addWidget(widget)
 
     def switch_page(self, page_key: str, title: str) -> None:
+        # “新建设备”直接复用列表页已有弹窗，避免维护重复表单页面。
+        if page_key == "new_device":
+            self.switch_page("devices", "设备列表")
+            self.page_map["devices"].open_create_dialog()
+            return
+
         widget = self.page_map.get(page_key)
         if widget is None:
             return
@@ -157,14 +168,18 @@ class MainWindow(QMainWindow):
         self.page_hint.setText(hint)
         self.page_hint.setVisible(bool(hint))
         self.page_header.setVisible(page_key not in {"devices", "device_detail"})
+        # 程序内部切页时同步菜单高亮，例如详情页返回设备列表。
+        self.sidebar.select_page(page_key)
 
     def handle_logout(self) -> None:
         try:
             self.auth_controller.logout()
-            QMessageBox.information(self, "退出成功", "登录状态已清除，请重新启动前端后再次登录。")
+            QMessageBox.information(self, "退出成功", "登录状态已清除，即将返回登录页面。")
         except ApiError as exc:
-            QMessageBox.warning(self, "已退出本地登录", f"本地登录状态已清除，但服务端退出返回异常：{exc}")
+            QMessageBox.warning(self, "已退出本地登录", f"本地登录状态已清除，即将返回登录页面。\n服务端退出异常：{exc}")
         finally:
+            # 通知应用入口重新打开登录窗口，避免退出后要求重启程序。
+            self.logout_completed.emit()
             self.close()
 
     def _refresh_user_info(self) -> None:
@@ -196,6 +211,7 @@ class MainWindow(QMainWindow):
             "new_device": "这里预留给新建设备流程。",
             "device_logs": "这里预留给操作日志查询与审计展示。",
             "attachments": "这里预留给附件的集中管理。",
+            "ocr": "使用本地 PP-OCRv6 提取图片文字。",
             "import_export": "",
             "profile": "这里预留给当前登录用户信息展示。",
             "users": "这里预留给用户列表与角色信息。",

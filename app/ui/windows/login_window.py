@@ -1,5 +1,6 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -19,6 +20,8 @@ class LoginWindow(QWidget):
     def __init__(self, auth_controller: AuthController) -> None:
         super().__init__()
         self.auth_controller = auth_controller
+        # 顶层对象名仅用于全局 QSS 定位登录窗口背景，不影响内部控件样式。
+        self.setObjectName("LoginWindow")
         self.setWindowTitle("登录 - 设备管理控制台")
         self.resize(480, 360)
 
@@ -29,8 +32,10 @@ class LoginWindow(QWidget):
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
 
         self.error_label = QLabel("")
-        self.error_label.setStyleSheet("color: #dc2626;")
+        # 登录错误提示使用全局错误文本样式，避免页面内重复定义颜色。
+        self.error_label.setObjectName("ErrorLabel")
         self.error_label.setWordWrap(True)
+        self.error_label.setVisible(False)
 
         self.login_button = QPushButton("登录")
         self.login_button.clicked.connect(self.handle_login)
@@ -82,16 +87,24 @@ class LoginWindow(QWidget):
         password = self.password_input.text().strip()
 
         if not username or not password:
-            self.error_label.setText("请输入用户名和密码")
+            self._set_error("请输入用户名和密码")
             return
 
         self.login_button.setEnabled(False)
-        self.error_label.setText("")
+        self.login_button.setText("正在登录...")
+        self._set_error("")
+        QApplication.processEvents()
 
         try:
             self.auth_controller.login(username, password)
             self.login_succeeded.emit()
         except ApiError as exc:
-            self.error_label.setText(str(exc))
+            self._set_error(str(exc))
         finally:
+            self.login_button.setText("登录")
             self.login_button.setEnabled(True)
+
+    def _set_error(self, message: str) -> None:
+        # 空错误不占用登录卡片空间，只有失败时才显示提示区域。
+        self.error_label.setText(message)
+        self.error_label.setVisible(bool(message))

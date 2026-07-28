@@ -1,4 +1,5 @@
 import json
+import mimetypes
 import re
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -162,6 +163,29 @@ class ApiClient:
         )
         return self._request_json(request)
 
+    def recognize_image(self, file_path: str) -> dict:
+        # OCR 接口接收单张图片，超时时间放宽以覆盖首次模型加载。
+        boundary = "----PracticeOcrUploadBoundary"
+        source_path = Path(file_path)
+        content_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
+        safe_name = source_path.name.replace('"', "")
+        body = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{safe_name}"\r\n'
+            f"Content-Type: {content_type}\r\n\r\n"
+        ).encode("utf-8") + source_path.read_bytes() + f"\r\n--{boundary}--\r\n".encode("utf-8")
+
+        request = Request(
+            url=f"{self.settings.api_base_url}/ocr/ppocrv6",
+            data=body,
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                **self._build_auth_headers(),
+            },
+            method="POST",
+        )
+        return self._request_json(request, timeout=180)
+
     def request_json(self, method: str, path: str, payload: dict | None = None) -> dict:
         url = f"{self.settings.api_base_url}{path}"
         headers = {
@@ -176,10 +200,10 @@ class ApiClient:
         request = Request(url=url, data=body, headers=headers, method=method)
         return self._request_json(request)
 
-    def _request_json(self, request: Request) -> dict:
+    def _request_json(self, request: Request, timeout: int = 10) -> dict:
         # 所有 JSON 接口统一走这里，保持鉴权和错误处理方式一致。
         try:
-            with urlopen(request, timeout=10) as response:
+            with urlopen(request, timeout=timeout) as response:
                 content = response.read().decode("utf-8")
                 return self._decode_payload(content)
         except HTTPError as exc:

@@ -1,5 +1,6 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QFormLayout,
@@ -40,8 +41,10 @@ class DeviceFormDialog(QDialog):
         self.status_input.addItem("已报废", "retired")
 
         self.error_label = QLabel("")
-        self.error_label.setStyleSheet("color: #dc2626;")
+        # 表单错误提示统一由全局 QSS 控制视觉样式。
+        self.error_label.setObjectName("ErrorLabel")
         self.error_label.setWordWrap(True)
+        self.error_label.setVisible(False)
 
         self.cancel_button = QPushButton("取消")
         self.cancel_button.setProperty("variant", "secondary")
@@ -116,11 +119,13 @@ class DeviceFormDialog(QDialog):
 
         validation_error = self._validate(payload)
         if validation_error:
-            self.error_label.setText(validation_error)
+            self._set_error(validation_error)
             return
 
         self.submit_button.setEnabled(False)
-        self.error_label.setText("")
+        self.submit_button.setText("正在保存...")
+        self._set_error("")
+        QApplication.processEvents()
 
         try:
             if self.is_edit_mode:
@@ -130,9 +135,15 @@ class DeviceFormDialog(QDialog):
             self.device_saved.emit()
             self.accept()
         except ApiError as exc:
-            self.error_label.setText(str(exc))
+            self._set_error(str(exc))
         finally:
+            self.submit_button.setText("保存修改" if self.is_edit_mode else "确定创建")
             self.submit_button.setEnabled(True)
+
+    def _set_error(self, message: str) -> None:
+        # 表单无错误时隐藏提示区域，避免弹窗出现空白红框。
+        self.error_label.setText(message)
+        self.error_label.setVisible(bool(message))
 
     def _validate(self, payload: dict) -> str:
         required_fields = {

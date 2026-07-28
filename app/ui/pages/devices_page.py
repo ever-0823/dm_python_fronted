@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QSpinBox,
     QTableWidget,
@@ -19,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from app.infrastructure.http.api_client import ApiClient, ApiError
 from app.ui.dialogs.device_form_dialog import DeviceFormDialog
+from app.ui.dialogs.message_box import AppMessageBox as QMessageBox
 
 
 class SelectAllHeader(QHeaderView):
@@ -89,6 +89,8 @@ class DevicesPage(QWidget):
         self.total_label.setObjectName("PageHint")
         self.new_button = QPushButton("新建设备")
         self.batch_delete_button = QPushButton("批量删除")
+        # 未勾选设备时禁用批量删除，避免用户点击后才收到无选择提示。
+        self.batch_delete_button.setEnabled(False)
         self.page_size_combo = QComboBox()
         self.page_size_combo.addItem("10/page", 10)
         self.page_size_combo.addItem("20/page", 20)
@@ -116,8 +118,8 @@ class DevicesPage(QWidget):
         root.setSpacing(16)
 
         title_row = QHBoxLayout()
-        # 适当增加标题行上边距，让右上角两个操作按钮整体下移一些。
-        title_row.setContentsMargins(0, 5, 0, 4)
+        # 上边距与标题栏下方间距保持一致，让标题和按钮在区域内上下居中。
+        title_row.setContentsMargins(0, 16, 0, 0)
         title_row.setSpacing(10)
         title_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         title = QLabel("设备列表")
@@ -246,23 +248,27 @@ class DevicesPage(QWidget):
                     item.get("model", ""),
                     item.get("manufacturer", ""),
                     item.get("location", ""),
-                    self._map_status(item.get("status", "")),
                 ]
                 for col_index, value in enumerate(values):
                     cell = QTableWidgetItem(str(value))
                     cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     self.table.setItem(row_index, col_index + 1, cell)
+                # 状态列使用紧凑标签，颜色由全局 QSS 根据状态属性统一控制。
+                self.table.setCellWidget(row_index, 6, self._build_status_widget(str(item.get("status", ""))))
                 self.table.setCellWidget(row_index, 7, self._build_action_widget(item))
 
             self.header.set_checked(False)
-            self.page_hint.clear()
-            self.page_hint.setVisible(False)
+            self.batch_delete_button.setEnabled(False)
+            # 空结果集保留明确提示，避免用户把空白表格误认为加载失败。
+            self.page_hint.setText("暂无符合条件的设备" if not items else "")
+            self.page_hint.setVisible(not items)
             self._update_pagination_ui()
         except ApiError as exc:
             # 接口异常时清空当前表格，避免页面保留过期数据造成误导。
             self.table.setRowCount(0)
             self.devices_cache = []
             self.header.set_checked(False)
+            self.batch_delete_button.setEnabled(False)
             self.page_hint.setText(str(exc))
             self.page_hint.setVisible(True)
             self.total_pages = 0
@@ -298,6 +304,8 @@ class DevicesPage(QWidget):
 
     def _build_action_widget(self, device: dict) -> QWidget:
         container = QWidget()
+        # 操作列容器保持透明，显示表格行本身的背景色。
+        container.setStyleSheet("background-color: transparent;")
         layout = QHBoxLayout(container)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
@@ -306,22 +314,29 @@ class DevicesPage(QWidget):
         # 操作列保留轻量文本按钮，减少表格尾列的视觉负担。
         edit_button = QPushButton("编辑")
         edit_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        edit_button.setStyleSheet(
-            "QPushButton { background: transparent; border: none; color: #1f4e79; padding: 0px; }"
-            "QPushButton:hover { color: #285f92; text-decoration: underline; }"
-        )
+        edit_button.setProperty("tableAction", "true")
         edit_button.clicked.connect(lambda: self.open_edit_dialog(device))
         layout.addWidget(edit_button)
 
         detail_button = QPushButton("详情")
         detail_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        detail_button.setStyleSheet(
-            "QPushButton { background: transparent; border: none; color: #1f4e79; padding: 0px; }"
-            "QPushButton:hover { color: #285f92; text-decoration: underline; }"
-        )
+        detail_button.setProperty("tableAction", "true")
         detail_button.clicked.connect(lambda: self.open_detail(device))
         layout.addWidget(detail_button)
 
+        return container
+
+    def _build_status_widget(self, status: str) -> QWidget:
+        # 标签放入透明容器中居中显示，避免背景色铺满整个状态单元格。
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        badge = QLabel(self._map_status(status))
+        badge.setObjectName("StatusBadge")
+        badge.setProperty("status", status or "unknown")
+        layout.addWidget(badge)
         return container
 
     def _configure_table_columns(self) -> None:
@@ -353,14 +368,16 @@ class DevicesPage(QWidget):
                 checkbox.blockSignals(True)
                 checkbox.setChecked(checked)
                 checkbox.blockSignals(False)
+        # 批量切换时信号被屏蔽，需要在循环后主动同步操作按钮状态。
+        self.batch_delete_button.setEnabled(checked and self.table.rowCount() > 0)
 
     def sync_header_checkbox(self) -> None:
         # 当每行复选框变化时，反向同步表头“全选”状态。
-        all_checked = self.table.rowCount() > 0 and all(
-            checkbox is not None and checkbox.isChecked()
-            for checkbox in (self._get_row_checkbox(row_index) for row_index in range(self.table.rowCount()))
-        )
+        checkboxes = [self._get_row_checkbox(row_index) for row_index in range(self.table.rowCount())]
+        all_checked = bool(checkboxes) and all(checkbox is not None and checkbox.isChecked() for checkbox in checkboxes)
         self.header.set_checked(all_checked)
+        # 任意一行被勾选即可执行批量删除，全部取消后恢复禁用状态。
+        self.batch_delete_button.setEnabled(any(checkbox is not None and checkbox.isChecked() for checkbox in checkboxes))
 
     def batch_delete_selected(self) -> None:
         # 批量删除前先收集当前页所有被勾选的设备对象。

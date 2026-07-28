@@ -18,6 +18,15 @@ class DashboardPage(QWidget):
         self.maintenance_card = StatCard("维护中", "0")
         self.inactive_card = StatCard("已停用", "0")
         self.retired_card = StatCard("已报废", "0")
+        # 指标属性交给全局 QSS 处理颜色，避免在卡片组件里重复写样式。
+        for card, metric in (
+            (self.total_card, "total"),
+            (self.active_card, "active"),
+            (self.maintenance_card, "maintenance"),
+            (self.inactive_card, "inactive"),
+            (self.retired_card, "retired"),
+        ):
+            card.setProperty("metric", metric)
 
         self.status_hint = QLabel("准备加载系统概况")
         self.status_hint.setObjectName("PageHint")
@@ -42,6 +51,9 @@ class DashboardPage(QWidget):
         card_grid = QGridLayout()
         card_grid.setHorizontalSpacing(16)
         card_grid.setVerticalSpacing(16)
+        # 三列等权拉伸，窗口变宽时统计卡片保持整齐对齐。
+        for column in range(3):
+            card_grid.setColumnStretch(column, 1)
         card_grid.addWidget(self.total_card, 0, 0)
         card_grid.addWidget(self.active_card, 0, 1)
         card_grid.addWidget(self.maintenance_card, 0, 2)
@@ -55,11 +67,9 @@ class DashboardPage(QWidget):
         hint_layout.setContentsMargins(20, 20, 20, 20)
         hint_layout.setSpacing(8)
 
-        section_title = QLabel("本页说明")
+        section_title = QLabel("系统状态")
         section_title.setObjectName("SectionTitle")
         hint_layout.addWidget(section_title)
-        hint_layout.addWidget(QLabel("1. 这里会展示设备总数和状态统计。"))
-        hint_layout.addWidget(QLabel("2. 后续我们会继续在这里加快捷入口、图表和最近操作。"))
         hint_layout.addWidget(self.status_hint)
 
         root.addWidget(hint_card, alignment=Qt.AlignmentFlag.AlignTop)
