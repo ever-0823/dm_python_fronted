@@ -186,7 +186,42 @@ class ApiClient:
         )
         return self._request_json(request, timeout=180)
 
-    def request_json(self, method: str, path: str, payload: dict | None = None) -> dict:
+    def upload_knowledge_document(self, file_path: str) -> dict:
+        # 知识文档上传复用现有 multipart 请求写法，模型处理时间较长所以放宽超时。
+        boundary = "----PracticeKnowledgeUploadBoundary"
+        source_path = Path(file_path)
+        content_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
+        safe_name = source_path.name.replace('"', "")
+        body = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{safe_name}"\r\n'
+            f"Content-Type: {content_type}\r\n\r\n"
+        ).encode("utf-8") + source_path.read_bytes() + f"\r\n--{boundary}--\r\n".encode("utf-8")
+        request = Request(
+            url=f"{self.settings.api_base_url}/knowledge/upload",
+            data=body,
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                **self._build_auth_headers(),
+            },
+            method="POST",
+        )
+        # 上传时间超过30分钟超时
+        return self._request_json(request, timeout=1800)
+
+    def get_knowledge_documents(self) -> dict:
+        # 文档列表接口返回已导入的文件和文本块数量。
+        return self.request_json("GET", "/knowledge/documents")
+
+    def search_knowledge(self, query: str, top_k: int = 5) -> dict:
+        # 首次加载 Qwen3 或 CPU 推理可能超过默认 10 秒，知识检索单独放宽超时。
+        return self.request_json("POST", "/knowledge/search", {"query": query, "top_k": top_k}, timeout=180)
+
+    def delete_knowledge_document(self, document_id: int) -> dict:
+        # 删除文档时后端通过外键级联删除对应文本块和向量。
+        return self.request_json("DELETE", f"/knowledge/documents/{document_id}")
+
+    def request_json(self, method: str, path: str, payload: dict | None = None, timeout: int = 10) -> dict:
         url = f"{self.settings.api_base_url}{path}"
         headers = {
             "Content-Type": "application/json",
@@ -198,7 +233,7 @@ class ApiClient:
             body = json.dumps(payload).encode("utf-8")
 
         request = Request(url=url, data=body, headers=headers, method=method)
-        return self._request_json(request)
+        return self._request_json(request, timeout=timeout)
 
     def _request_json(self, request: Request, timeout: int = 10) -> dict:
         # 所有 JSON 接口统一走这里，保持鉴权和错误处理方式一致。

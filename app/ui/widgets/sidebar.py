@@ -38,6 +38,7 @@ class Sidebar(QWidget):
                 ("ocr", "图片文字识别"),
                 ("attachments", "附件管理"),
                 ("import_export", "数据导入导出"),
+                ("knowledge", "向量知识库"),
             ],
             "用户中心": [("profile", "当前用户"), ("users", "用户列表")],
             "系统管理": [("system", "服务状态")],
