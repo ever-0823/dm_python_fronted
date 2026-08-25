@@ -1,10 +1,12 @@
 import json
 import mimetypes
 import re
+from collections.abc import Callable
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from uuid import uuid4
 
 from app.infrastructure.config import AppSettings
 from app.infrastructure.storage.token_store import TokenStore
@@ -80,44 +82,16 @@ class ApiClient:
         return self.request_json("POST", "/devices/batch-delete", {"device_ids": device_ids})
 
     def upload_device_attachment(self, device_id: str, file_path: str) -> dict:
-        # 上传附件时手动构造 multipart/form-data，请求体里包含文件名和二进制内容。
-        boundary = "----CodexDeviceUploadBoundary"
-        source_path = Path(file_path)
-        file_bytes = source_path.read_bytes()
-        body = (
-            f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="file"; filename="{source_path.name}"\r\n'
-            "Content-Type: application/octet-stream\r\n\r\n"
-        ).encode("utf-8") + file_bytes + f"\r\n--{boundary}--\r\n".encode("utf-8")
-
-        request = Request(
-            url=f"{self.settings.api_base_url}/devices/{device_id}/upload",
-            data=body,
-            headers={
-                "Content-Type": f"multipart/form-data; boundary={boundary}",
-                **self._build_auth_headers(),
-            },
-            method="POST",
+        # 设备附件仍使用二进制类型，multipart 细节由 transport implementation 统一处理。
+        return self._upload_file(
+            f"/devices/{device_id}/upload",
+            file_path,
+            content_type="application/octet-stream",
         )
-        return self._request_json(request)
 
     def download_device_attachment(self, device_id: str) -> tuple[bytes, str]:
         # 下载接口返回文件流，界面层再决定保存到哪个本地路径。
-        request = Request(
-            url=f"{self.settings.api_base_url}/devices/{device_id}/download",
-            headers=self._build_auth_headers(),
-            method="GET",
-        )
-        try:
-            with urlopen(request, timeout=10) as response:
-                content = response.read()
-                filename = self._extract_filename(response.headers.get("Content-Disposition", ""))
-                return content, filename or f"{device_id}_attachment"
-        except HTTPError as exc:
-            message = self._decode_error(exc)
-            raise ApiError(message) from exc
-        except URLError as exc:
-            raise ApiError("无法连接后端服务，请确认 FastAPI 已启动") from exc
+        return self._request_bytes(f"/devices/{device_id}/download", f"{device_id}_attachment")
 
     def delete_device_attachment(self, device_id: str) -> dict:
         # 删除附件复用后端现有接口。
@@ -125,89 +99,20 @@ class ApiClient:
 
     def export_devices_csv(self) -> tuple[bytes, str]:
         # 导出接口直接返回 CSV 文件流，界面层负责让用户选择保存位置。
-        request = Request(
-            url=f"{self.settings.api_base_url}/devices/export",
-            headers=self._build_auth_headers(),
-            method="GET",
-        )
-        try:
-            with urlopen(request, timeout=10) as response:
-                content = response.read()
-                filename = self._extract_filename(response.headers.get("Content-Disposition", ""))
-                return content, filename or "devices.csv"
-        except HTTPError as exc:
-            message = self._decode_error(exc)
-            raise ApiError(message) from exc
-        except URLError as exc:
-            raise ApiError("无法连接后端服务，请确认 FastAPI 已启动") from exc
+        return self._request_bytes("/devices/export", "devices.csv")
 
     def import_devices_csv(self, file_path: str) -> dict:
         # CSV 导入也走 multipart/form-data，请求体里只携带一个上传文件。
-        boundary = "----CodexDeviceImportBoundary"
-        source_path = Path(file_path)
-        file_bytes = source_path.read_bytes()
-        body = (
-            f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="file"; filename="{source_path.name}"\r\n'
-            "Content-Type: text/csv\r\n\r\n"
-        ).encode("utf-8") + file_bytes + f"\r\n--{boundary}--\r\n".encode("utf-8")
-
-        request = Request(
-            url=f"{self.settings.api_base_url}/devices/import",
-            data=body,
-            headers={
-                "Content-Type": f"multipart/form-data; boundary={boundary}",
-                **self._build_auth_headers(),
-            },
-            method="POST",
-        )
-        return self._request_json(request)
+        return self._upload_file("/devices/import", file_path, content_type="text/csv")
 
     def recognize_image(self, file_path: str) -> dict:
         # OCR 接口接收单张图片，超时时间放宽以覆盖首次模型加载。
-        boundary = "----PracticeOcrUploadBoundary"
-        source_path = Path(file_path)
-        content_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
-        safe_name = source_path.name.replace('"', "")
-        body = (
-            f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="file"; filename="{safe_name}"\r\n'
-            f"Content-Type: {content_type}\r\n\r\n"
-        ).encode("utf-8") + source_path.read_bytes() + f"\r\n--{boundary}--\r\n".encode("utf-8")
-
-        request = Request(
-            url=f"{self.settings.api_base_url}/ocr/ppocrv6",
-            data=body,
-            headers={
-                "Content-Type": f"multipart/form-data; boundary={boundary}",
-                **self._build_auth_headers(),
-            },
-            method="POST",
-        )
-        return self._request_json(request, timeout=180)
+        return self._upload_file("/ocr/ppocrv6", file_path, timeout=180)
 
     def upload_knowledge_document(self, file_path: str) -> dict:
         # 知识文档上传复用现有 multipart 请求写法，模型处理时间较长所以放宽超时。
-        boundary = "----PracticeKnowledgeUploadBoundary"
-        source_path = Path(file_path)
-        content_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
-        safe_name = source_path.name.replace('"', "")
-        body = (
-            f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="file"; filename="{safe_name}"\r\n'
-            f"Content-Type: {content_type}\r\n\r\n"
-        ).encode("utf-8") + source_path.read_bytes() + f"\r\n--{boundary}--\r\n".encode("utf-8")
-        request = Request(
-            url=f"{self.settings.api_base_url}/knowledge/upload",
-            data=body,
-            headers={
-                "Content-Type": f"multipart/form-data; boundary={boundary}",
-                **self._build_auth_headers(),
-            },
-            method="POST",
-        )
-        # 上传时间超过30分钟超时
-        return self._request_json(request, timeout=1800)
+        # 上传时间超过 30 分钟后超时，避免模型异常时请求永久等待。
+        return self._upload_file("/knowledge/upload", file_path, timeout=1800)
 
     def get_knowledge_documents(self) -> dict:
         # 文档列表接口返回已导入的文件和文本块数量。
@@ -217,30 +122,130 @@ class ApiClient:
         # 首次加载 Qwen3 或 CPU 推理可能超过默认 10 秒，知识检索单独放宽超时。
         return self.request_json("POST", "/knowledge/search", {"query": query, "top_k": top_k}, timeout=180)
 
+    def ask_knowledge(self, query: str, top_k: int = 5) -> dict:
+        # Ollama 生成答案时间更长，使用独立长超时，不影响普通接口。
+        return self.request_json("POST", "/knowledge/ask", {"query": query, "top_k": top_k}, timeout=300)
+
+    def stream_knowledge_answer(
+        self,
+        query: str,
+        top_k: int,
+        on_chunk: Callable[[str], None],
+    ) -> dict:
+        """读取后端 NDJSON 流，并在每个答案片段到达时通知界面。"""
+        request = self._build_request(
+            "POST",
+            "/knowledge/ask/stream",
+            data=json.dumps({"query": query, "top_k": top_k}, ensure_ascii=False).encode("utf-8"),
+            content_type="application/json",
+        )
+        data = {"answer": "", "sources": [], "items": []}
+        completed = False
+        try:
+            with urlopen(request, timeout=300) as response:
+                for raw_line in response:
+                    if not raw_line.strip():
+                        continue
+                    event = json.loads(raw_line.decode("utf-8"))
+                    if event.get("type") == "metadata":
+                        data["sources"] = event.get("sources") or []
+                        data["items"] = event.get("items") or []
+                    elif event.get("type") == "delta":
+                        content = str(event.get("content") or "")
+                        data["answer"] += content
+                        if content:
+                            on_chunk(content)
+                    elif event.get("type") == "done":
+                        completed = True
+        except HTTPError as exc:
+            message = self._decode_error(exc)
+            raise ApiError(message) from exc
+        except (URLError, OSError) as exc:
+            raise ApiError("流式问答连接中断，请稍后重试") from exc
+        except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as exc:
+            raise ApiError("流式问答返回的数据格式错误") from exc
+
+        if not completed:
+            raise ApiError("流式问答未正常结束，请稍后重试")
+        return {"success": True, "message": "ok", "data": data}
+
     def delete_knowledge_document(self, document_id: int) -> dict:
         # 删除文档时后端通过外键级联删除对应文本块和向量。
         return self.request_json("DELETE", f"/knowledge/documents/{document_id}")
 
     def request_json(self, method: str, path: str, payload: dict | None = None, timeout: int = 10) -> dict:
-        url = f"{self.settings.api_base_url}{path}"
-        headers = {
-            "Content-Type": "application/json",
-            **self._build_auth_headers(),
-        }
-
         body = None
         if payload is not None:
             body = json.dumps(payload).encode("utf-8")
 
-        request = Request(url=url, data=body, headers=headers, method=method)
+        request = self._build_request(method, path, data=body, content_type="application/json")
         return self._request_json(request, timeout=timeout)
 
     def _request_json(self, request: Request, timeout: int = 10) -> dict:
         # 所有 JSON 接口统一走这里，保持鉴权和错误处理方式一致。
+        content, _ = self._read_response(request, timeout)
+        return self._decode_payload(content.decode("utf-8"))
+
+
+    # 文件上传统
+    def _upload_file(
+        self,
+        path: str,
+        file_path: str,
+        timeout: int = 10,
+        content_type: str | None = None,
+    ) -> dict:
+        """构造单文件 multipart 请求并返回标准 JSON 结果。"""
+        source_path = Path(file_path)
+        boundary = f"----PracticeUpload{uuid4().hex}"
+        file_type = content_type or mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
+        # 清理文件名中的头部分隔字符，避免破坏 multipart 请求格式。
+        safe_name = source_path.name.replace('"', "").replace("\r", "").replace("\n", "")
+        body = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{safe_name}"\r\n'
+            f"Content-Type: {file_type}\r\n\r\n"
+        ).encode("utf-8") + source_path.read_bytes() + f"\r\n--{boundary}--\r\n".encode("utf-8")
+        request = self._build_request(
+            "POST",
+            path,
+            data=body,
+            content_type=f"multipart/form-data; boundary={boundary}",
+        )
+        return self._request_json(request, timeout)
+
+    def _request_bytes(self, path: str, fallback_filename: str, timeout: int = 10) -> tuple[bytes, str]:
+        """读取文件响应，并统一解析下载文件名。"""
+        request = self._build_request("GET", path)
+        content, content_disposition = self._read_response(request, timeout)
+        filename = self._extract_filename(content_disposition)
+        return content, filename or fallback_filename
+
+    def _build_request(
+        self,
+        method: str,
+        path: str,
+        data: bytes | None = None,
+        content_type: str | None = None,
+    ) -> Request:
+        """统一拼接地址、认证头和内容类型。"""
+        headers = self._build_auth_headers()
+        if content_type:
+            headers["Content-Type"] = content_type
+        return Request(
+            url=f"{self.settings.api_base_url}{path}",
+            data=data,
+            headers=headers,
+            method=method,
+        )
+
+    def _read_response(self, request: Request, timeout: int) -> tuple[bytes, str]:
+        """统一读取非流式响应并映射 HTTP、连接错误。"""
         try:
             with urlopen(request, timeout=timeout) as response:
-                content = response.read().decode("utf-8")
-                return self._decode_payload(content)
+                content = response.read()
+                content_disposition = response.headers.get("Content-Disposition", "")
+                return content, content_disposition
         except HTTPError as exc:
             message = self._decode_error(exc)
             raise ApiError(message) from exc

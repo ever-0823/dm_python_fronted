@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QDragEnterEvent, QDropEvent, QTextCursor
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QSplitter,
     QTableWidget,
@@ -94,6 +95,8 @@ class KnowledgeWorker(QObject):
 class KnowledgePage(QWidget):
     """知识库文档管理与相似度检索页面。"""
 
+    # 网络线程只发送文本信号，答案控件始终由 Qt 主线程更新。
+    answer_chunk_received = Signal(str)
     ALLOWED_SUFFIXES = {".pdf", ".txt"}
     MAX_FILE_BYTES = 20 * 1024 * 1024
 
@@ -104,6 +107,7 @@ class KnowledgePage(QWidget):
         self._worker: KnowledgeWorker | None = None
         self._reload_documents = False
         self._build_ui()
+        self.answer_chunk_received.connect(self._append_answer_chunk)
         self.load_documents()
 
     def _build_ui(self) -> None:
@@ -183,7 +187,16 @@ class KnowledgePage(QWidget):
         query_row.addWidget(self.search_button)
         search_layout.addLayout(query_row)
 
+        self.answer_text = QPlainTextEdit()
+        self.answer_text.setObjectName("KnowledgeAnswer")
+        self.answer_text.setReadOnly(True)
+        self.answer_text.setPlaceholderText("生成的答案将在这里显示")
+        self.answer_text.setMaximumHeight(130)
+        search_layout.addWidget(self.answer_text)
+
         self.results_table = QTableWidget(0, 4)
+        # 检索结果只用于阅读，关闭焦点框以免单元格文字周围出现黑色虚线。
+        self.results_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.results_table.setHorizontalHeaderLabels(["相似度", "来源文档", "页码", "命中上下文"])
         self.results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -240,9 +253,16 @@ class KnowledgePage(QWidget):
         query = self.query_input.text().strip()
         if not query or self._thread is not None:
             return
-        self._set_busy(True, "正在检索相关知识。")
-        # 回调通过关键字传入，避免被误当成 search_knowledge 的位置参数。
-        self._start_worker(self.api_client.search_knowledge, query, 5, on_success=self._search_succeeded)
+        self.answer_text.clear()
+        self._set_busy(True, "正在检索并生成答案。")
+        # 工作线程通过 Signal.emit 传回文本片段，避免直接跨线程修改控件。
+        self._start_worker(
+            self.api_client.stream_knowledge_answer,
+            query,
+            5,
+            self.answer_chunk_received.emit,
+            on_success=self._search_succeeded,
+        )
 
     def delete_document(self, document_id: int, name: str) -> None:
         if self._thread is not None:
@@ -312,7 +332,9 @@ class KnowledgePage(QWidget):
 
     @Slot(dict)
     def _search_succeeded(self, response: dict) -> None:
-        items = (response.get("data") or {}).get("items") or []
+        data = response.get("data") or {}
+        self.answer_text.setPlainText(str(data.get("answer") or "未生成答案。"))
+        items = data.get("items") or []
         self.results_table.setRowCount(len(items))
         for row, item in enumerate(items):
             values = [
@@ -328,6 +350,13 @@ class KnowledgePage(QWidget):
                     cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.results_table.setItem(row, column, cell)
         self._set_status(f"检索完成，返回 {len(items)} 条相关内容。", "success")
+
+    @Slot(str)
+    def _append_answer_chunk(self, content: str) -> None:
+        """把新到达的答案片段追加到末尾并保持光标可见。"""
+        self.answer_text.moveCursor(QTextCursor.MoveOperation.End)
+        self.answer_text.insertPlainText(content)
+        self.answer_text.ensureCursorVisible()
 
     @Slot(dict)
     def _delete_succeeded(self, _response: dict) -> None:

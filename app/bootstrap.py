@@ -189,6 +189,13 @@ def load_stylesheet() -> str:
         border: 1px solid #e2e8f0;
         border-radius: 6px;
     }
+    QPlainTextEdit#KnowledgeAnswer {
+        background-color: #f8fbfe;
+        color: #202938;
+        border: 1px solid #cbd8e6;
+        border-radius: 6px;
+        padding: 8px;
+    }
     QLabel#AttachmentFile {
         background-color: #f8fafc;
         color: #344054;
