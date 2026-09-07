@@ -38,6 +38,7 @@ class Sidebar(QWidget):
                 ("ocr", "图片文字识别"),
                 ("attachments", "附件管理"),
                 ("import_export", "数据导入导出"),
+                # 向量知识库使用单一入口，数据集和搜索测试在页面顶部切换。
                 ("knowledge", "向量知识库"),
             ],
             "用户中心": [("profile", "当前用户"), ("users", "用户列表")],
@@ -54,11 +55,24 @@ class Sidebar(QWidget):
             root.setFont(0, section_font)
             root.setIcon(0, self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown))
             self.tree.addTopLevelItem(root)
-            for page_key, child_title in children:
+            for menu_item in children:
+                page_key, child_title = menu_item[:2]
                 child = QTreeWidgetItem([child_title])
-                # 将页面 key 和标题挂到节点上，点击时可直接读取。
-                child.setData(0, Qt.ItemDataRole.UserRole, (page_key, child_title))
                 root.addChild(child)
+                nested_items = menu_item[2] if len(menu_item) == 3 else []
+                if nested_items:
+                    # 有下级菜单的节点只负责展开和收起，不直接切换页面。
+                    child.setFlags(child.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                    child.setIcon(0, self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown))
+                    for nested_key, nested_title in nested_items:
+                        nested = QTreeWidgetItem([nested_title])
+                        # 末级节点保存页面 key，主窗口据此切换页面。
+                        nested.setData(0, Qt.ItemDataRole.UserRole, (nested_key, nested_title))
+                        child.addChild(nested)
+                    child.setExpanded(True)
+                else:
+                    # 将页面 key 和标题挂到末级节点上，点击时可直接读取。
+                    child.setData(0, Qt.ItemDataRole.UserRole, (page_key, child_title))
             root.setExpanded(True)
 
         # 默认选中第一个功能入口，保证首次进入时导航状态明确。
@@ -67,7 +81,7 @@ class Sidebar(QWidget):
 
     def _update_section_icon(self, item: QTreeWidgetItem) -> None:
         """根据一级菜单的展开状态切换方向符号。"""
-        if item.parent() is not None:
+        if not item.childCount():
             return
         icon_type = QStyle.StandardPixmap.SP_ArrowDown if item.isExpanded() else QStyle.StandardPixmap.SP_ArrowRight
         item.setIcon(0, self.style().standardIcon(icon_type))
@@ -77,13 +91,19 @@ class Sidebar(QWidget):
         # 菜单数量较少，直接遍历可保持实现清晰且无需额外索引结构。
         for root_index in range(self.tree.topLevelItemCount()):
             root = self.tree.topLevelItem(root_index)
-            for child_index in range(root.childCount()):
-                child = root.child(child_index)
-                payload = child.data(0, Qt.ItemDataRole.UserRole)
+            stack = [root]
+            while stack:
+                item = stack.pop()
+                payload = item.data(0, Qt.ItemDataRole.UserRole)
                 if payload and payload[0] == page_key:
-                    root.setExpanded(True)
-                    self.tree.setCurrentItem(child)
+                    # 展开当前节点的所有父级，保证切页后用户能看到选中项。
+                    parent = item.parent()
+                    while parent is not None:
+                        parent.setExpanded(True)
+                        parent = parent.parent()
+                    self.tree.setCurrentItem(item)
                     return
+                stack.extend(item.child(index) for index in range(item.childCount()))
 
     def _handle_item_clicked(self, item: QTreeWidgetItem, _: int) -> None:
         payload = item.data(0, Qt.ItemDataRole.UserRole)

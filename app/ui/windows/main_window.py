@@ -19,7 +19,7 @@ from app.ui.pages.current_user_page import CurrentUserPage
 from app.ui.pages.device_detail_page import DeviceDetailPage
 from app.ui.pages.devices_page import DevicesPage
 from app.ui.pages.import_export_page import ImportExportPage
-from app.ui.pages.knowledge_page import KnowledgePage
+from app.ui.pages.knowledge_page import KnowledgeWorkspacePage
 from app.ui.pages.ocr_page import OcrPage
 from app.ui.pages.placeholder_page import PlaceholderPage
 from app.ui.widgets.sidebar import Sidebar
@@ -142,7 +142,8 @@ class MainWindow(QMainWindow):
             "ocr": OcrPage(self.api_client),
             # 导入导出页使用正式功能页，替换原来的占位提示。
             "import_export": ImportExportPage(self.api_client),
-            "knowledge": KnowledgePage(self.api_client),
+            # 向量知识库在一个工作台中提供数据集管理和搜索测试。
+            "knowledge": KnowledgeWorkspacePage(self.api_client),
             "profile": profile_page,
             "users": PlaceholderPage("用户列表", "后续这里会展示用户列表和角色信息。"),
             "system": PlaceholderPage("服务状态", "后续这里会接健康检查和数据库连通检查。"),
@@ -169,7 +170,8 @@ class MainWindow(QMainWindow):
         hint = self._page_hint(page_key)
         self.page_hint.setText(hint)
         self.page_hint.setVisible(bool(hint))
-        self.page_header.setVisible(page_key not in {"devices", "device_detail"})
+        # 知识库工作台自带页签导航，不重复展示通用页面标题卡片。
+        self.page_header.setVisible(page_key not in {"devices", "device_detail", "knowledge"})
         # 程序内部切页时同步菜单高亮，例如详情页返回设备列表。
         self.sidebar.select_page(page_key)
 
@@ -215,7 +217,7 @@ class MainWindow(QMainWindow):
             "attachments": "这里预留给附件的集中管理。",
             "ocr": "使用本地 PP-OCRv6 提取图片文字。",
             "import_export": "",
-            "knowledge": "上传文档并使用 Qwen3 Embedding 进行相似度检索。",
+            "knowledge": "管理知识库数据集并测试向量搜索效果。",
             "profile": "这里预留给当前登录用户信息展示。",
             "users": "这里预留给用户列表与角色信息。",
             "system": "这里预留给服务与数据库状态监控。",

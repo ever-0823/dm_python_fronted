@@ -173,6 +173,268 @@ def load_stylesheet() -> str:
         background-color: #eaf2f9;
         border: 2px dashed #4d7ca8;
     }
+    QLabel#KnowledgeUploadIcon {
+        color: #2f6fed;
+        font-size: 28px;
+        font-weight: 700;
+    }
+    QFrame#KnowledgeStepBar {
+        background-color: #f7f9fc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+    }
+    QLabel#KnowledgeStepCircle {
+        color: #667085;
+        background-color: #e8edf3;
+        border-radius: 13px;
+        font-weight: 700;
+    }
+    QLabel#KnowledgeStepCircle[stepState="current"],
+    QLabel#KnowledgeStepCircle[stepState="complete"] {
+        color: #ffffff;
+        background-color: #3f78ee;
+    }
+    QLabel#KnowledgeStepText {
+        color: #667085;
+    }
+    QLabel#KnowledgeStepText[stepState="current"],
+    QLabel#KnowledgeStepText[stepState="complete"] {
+        color: #233b5d;
+        font-weight: 700;
+    }
+    QFrame#KnowledgeStepLine {
+        background-color: #dce3ec;
+        border: none;
+    }
+    QFrame#KnowledgeStepLine[active="true"] {
+        background-color: #3f78ee;
+    }
+    QFrame#KnowledgeSettingsPanel {
+        background-color: #ffffff;
+        border: none;
+    }
+    QFrame#KnowledgeOptionCard {
+        background-color: #ffffff;
+        border: 1px solid #d9e1eb;
+        border-radius: 8px;
+    }
+    QFrame#KnowledgeOptionCard[selected="true"] {
+        background-color: #f7faff;
+        border: 2px solid #4a7ff0;
+    }
+    QFrame#KnowledgeSettingsPanel QRadioButton {
+        color: #26364d;
+        spacing: 8px;
+        font-weight: 700;
+    }
+    QFrame#KnowledgeSettingsPanel QRadioButton::indicator {
+        width: 15px;
+        height: 15px;
+    }
+    QFrame#KnowledgePreviewPane {
+        background-color: #ffffff;
+        border: 1px solid #dfe6ee;
+        border-radius: 8px;
+    }
+    QLabel#KnowledgeSelectedFile {
+        color: #24415f;
+        background-color: #eef4ff;
+        border: 1px solid #5b87ee;
+        border-radius: 7px;
+        padding: 14px 12px;
+    }
+    QTableWidget#KnowledgeWizardTable {
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        gridline-color: #edf1f5;
+    }
+    /* 向导表格单元格增加水平留白，不影响设备列表等其他表格。 */
+    QTableWidget#KnowledgeWizardTable::item {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+    QTableWidget#KnowledgeWizardTable QHeaderView::section {
+        background-color: #f5f7fa;
+        color: #344054;
+        padding: 10px 12px;
+        border: none;
+        border-bottom: 1px solid #dfe6ee;
+        font-weight: 700;
+    }
+    QProgressBar#KnowledgeFileProgress {
+        background-color: #e8edf3;
+        color: #356046;
+        border: none;
+        border-radius: 4px;
+        text-align: center;
+        min-height: 8px;
+        max-height: 18px;
+    }
+    QProgressBar#KnowledgeFileProgress::chunk {
+        background-color: #37b978;
+        border-radius: 4px;
+    }
+    /* 知识库工作台页签居中显示，数据集和搜索测试保持同一页面层级。 */
+    QTabWidget#KnowledgeWorkspaceTabs {
+        background-color: #ffffff;
+    }
+    QTabWidget#KnowledgeWorkspaceTabs::pane {
+        background-color: #ffffff;
+        border: none;
+        border-top: 1px solid #e2e8f0;
+    }
+    QTabWidget#KnowledgeWorkspaceTabs::tab-bar {
+        alignment: center;
+    }
+    QTabWidget#KnowledgeWorkspaceTabs QTabBar::tab {
+        background-color: transparent;
+        color: #475467;
+        border: none;
+        border-bottom: 2px solid transparent;
+        padding: 11px 18px;
+        min-width: 72px;
+    }
+    QTabWidget#KnowledgeWorkspaceTabs QTabBar::tab:selected {
+        color: #2f6fed;
+        border-bottom-color: #2f6fed;
+        font-weight: 700;
+    }
+    QFrame#KnowledgeDatasetToolbar {
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+    }
+    QLabel#KnowledgeDatasetCount {
+        color: #173f67;
+        font-size: 15px;
+        font-weight: 700;
+    }
+    QTableWidget#KnowledgeDatasetTable,
+    QTableWidget#KnowledgeChunksTable {
+        border-radius: 8px;
+    }
+    /* 知识库聊天页采用独立会话栏、消息区和输入区，不影响其他业务页面。 */
+    QFrame#KnowledgeChatPanel {
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+    }
+    QFrame#KnowledgeChatSidebar {
+        background-color: #f7f8fa;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+    }
+    QLabel#KnowledgeChatSidebarTitle,
+    QLabel#KnowledgeChatTitle {
+        color: #173f67;
+        font-size: 16px;
+        font-weight: 700;
+    }
+    QPushButton#KnowledgeChatSession {
+        background-color: #e8f0fb;
+        color: #1f4e79;
+        border: none;
+        border-radius: 6px;
+        padding: 8px 10px;
+        text-align: left;
+    }
+    QFrame#KnowledgeChatHeader {
+        background-color: #ffffff;
+        border: none;
+        border-bottom: 1px solid #e2e8f0;
+    }
+    QScrollArea#KnowledgeChatMessages,
+    QWidget#KnowledgeChatMessagesContainer {
+        background-color: #ffffff;
+        border: none;
+    }
+    QFrame#KnowledgeChatWelcome {
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+    }
+    QLabel#KnowledgeChatWelcomeTitle {
+        color: #173f67;
+        font-size: 24px;
+        font-weight: 700;
+    }
+    QFrame#KnowledgeChatBubble {
+        background-color: transparent;
+        border: none;
+        border-radius: 0;
+    }
+    QFrame#KnowledgeChatBubble[role="assistant"] {
+        background-color: transparent;
+        border: none;
+    }
+    QFrame#KnowledgeChatBubble[role="user"] {
+        background-color: #f1f2f4;
+        border: none;
+        border-radius: 14px;
+    }
+    QLabel#KnowledgeChatAvatar {
+        color: #ffffff;
+        background-color: #2f6fed;
+        border-radius: 16px;
+        font-size: 11px;
+        font-weight: 700;
+    }
+    QLabel#KnowledgeChatRole {
+        color: #344054;
+        font-size: 13px;
+        font-weight: 700;
+    }
+    QLabel#KnowledgeChatMessage {
+        color: #26364d;
+        line-height: 1.5;
+    }
+    QLabel#KnowledgeChatMessage[role="user"] {
+        color: #202938;
+    }
+    QLabel#KnowledgeChatSources {
+        color: #667085;
+        background-color: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        padding: 8px 10px;
+        font-size: 12px;
+    }
+    QFrame#KnowledgeChatComposer {
+        background-color: #ffffff;
+        border: none;
+        border-top: 1px solid #e2e8f0;
+    }
+    QFrame#KnowledgeChatInputShell {
+        background-color: #ffffff;
+        border: 1px solid #d0d5dd;
+        border-radius: 22px;
+    }
+    QPlainTextEdit#KnowledgeChatInput {
+        background-color: transparent;
+        color: #202938;
+        border: none;
+        padding: 6px 4px;
+    }
+    QToolButton#KnowledgeChatSend {
+        background-color: #8b8f94;
+        color: #ffffff;
+        border: none;
+        border-radius: 18px;
+        padding: 0;
+        font-size: 20px;
+        font-weight: 700;
+    }
+    QToolButton#KnowledgeChatSend:hover {
+        background-color: #6f747a;
+    }
+    QToolButton#KnowledgeChatSend:pressed {
+        background-color: #565b61;
+    }
+    QToolButton#KnowledgeChatSend:disabled {
+        background-color: #d0d5dd;
+        color: #ffffff;
+    }
     QFrame#OcrDropZone {
         background-color: #f8fbfe;
         border: 1px dashed #aebfd1;
@@ -188,13 +450,6 @@ def load_stylesheet() -> str:
         color: #98a2b3;
         border: 1px solid #e2e8f0;
         border-radius: 6px;
-    }
-    QPlainTextEdit#KnowledgeAnswer {
-        background-color: #f8fbfe;
-        color: #202938;
-        border: 1px solid #cbd8e6;
-        border-radius: 6px;
-        padding: 8px;
     }
     QLabel#AttachmentFile {
         background-color: #f8fafc;
@@ -364,6 +619,15 @@ def load_stylesheet() -> str:
         background-color: #e2e8f0;
         border-color: #e2e8f0;
         color: #94a3b8;
+    }
+
+    /* 知识库向导导航按钮用外边框表示焦点，移除文字内部虚线。 */
+    QPushButton[wizardNavigation="true"] {
+        outline: none;
+    }
+    QPushButton[wizardNavigation="true"]:focus {
+        border: 2px solid #6f9fca;
+        padding: 5px 13px;
     }
 
     /* 表格操作按钮仅显示文字，避免操作列出现重复边框和背景块。 */

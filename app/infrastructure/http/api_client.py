@@ -3,6 +3,7 @@ import mimetypes
 import re
 from collections.abc import Callable
 from pathlib import Path
+from threading import Event, Lock
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -20,6 +21,10 @@ class ApiClient:
     def __init__(self, settings: AppSettings, token_store: TokenStore) -> None:
         self.settings = settings
         self.token_store = token_store
+        # 聊天页通过关闭当前响应中断流式读取，避免不安全地强制终止 QThread。
+        self._knowledge_cancel_event = Event()
+        self._knowledge_response = None
+        self._knowledge_response_lock = Lock()
 
     def login(self, username: str, password: str) -> dict:
         payload = {
@@ -109,14 +114,30 @@ class ApiClient:
         # OCR 接口接收单张图片，超时时间放宽以覆盖首次模型加载。
         return self._upload_file("/ocr/ppocrv6", file_path, timeout=180)
 
-    def upload_knowledge_document(self, file_path: str) -> dict:
+    def upload_knowledge_document(self, file_path: str, qa_split: bool = False) -> dict:
         # 知识文档上传复用现有 multipart 请求写法，模型处理时间较长所以放宽超时。
         # 上传时间超过 30 分钟后超时，避免模型异常时请求永久等待。
-        return self._upload_file("/knowledge/upload", file_path, timeout=1800)
+        return self._upload_file(
+            "/knowledge/upload",
+            file_path,
+            timeout=1800,
+            form_fields={"qa_split": "true" if qa_split else "false"},
+        )
+
+    def preview_knowledge_document(self, file_path: str) -> dict:
+        # 预览只提取和切分文档，不调用 Embedding、Ollama 或数据库。
+        return self._upload_file("/knowledge/preview", file_path, timeout=180)
 
     def get_knowledge_documents(self) -> dict:
         # 文档列表接口返回已导入的文件和文本块数量。
         return self.request_json("GET", "/knowledge/documents")
+
+    def get_knowledge_document_chunks(self, document_id: int, page: int = 1, page_size: int = 50) -> dict:
+        # 数据集详情按页返回文本块，避免大文档一次加载导致界面卡顿。
+        return self.request_json(
+            "GET",
+            f"/knowledge/documents/{document_id}/chunks?page={page}&page_size={page_size}",
+        )
 
     def search_knowledge(self, query: str, top_k: int = 5) -> dict:
         # 首次加载 Qwen3 或 CPU 推理可能超过默认 10 秒，知识检索单独放宽超时。
@@ -141,33 +162,57 @@ class ApiClient:
         )
         data = {"answer": "", "sources": [], "items": []}
         completed = False
+        self._knowledge_cancel_event.clear()
         try:
             with urlopen(request, timeout=300) as response:
-                for raw_line in response:
-                    if not raw_line.strip():
-                        continue
-                    event = json.loads(raw_line.decode("utf-8"))
-                    if event.get("type") == "metadata":
-                        data["sources"] = event.get("sources") or []
-                        data["items"] = event.get("items") or []
-                    elif event.get("type") == "delta":
-                        content = str(event.get("content") or "")
-                        data["answer"] += content
-                        if content:
-                            on_chunk(content)
-                    elif event.get("type") == "done":
-                        completed = True
+                with self._knowledge_response_lock:
+                    self._knowledge_response = response
+                try:
+                    for raw_line in response:
+                        if self._knowledge_cancel_event.is_set():
+                            return {"success": True, "cancelled": True, "data": data}
+                        if not raw_line.strip():
+                            continue
+                        event = json.loads(raw_line.decode("utf-8"))
+                        if event.get("type") == "metadata":
+                            data["sources"] = event.get("sources") or []
+                            data["items"] = event.get("items") or []
+                        elif event.get("type") == "delta":
+                            content = str(event.get("content") or "")
+                            data["answer"] += content
+                            if content:
+                                on_chunk(content)
+                        elif event.get("type") == "error":
+                            # 流已建立后 HTTP 状态码无法改变，后端通过 error 事件传递真实原因。
+                            raise ApiError(str(event.get("message") or "流式问答失败，请稍后重试"))
+                        elif event.get("type") == "done":
+                            completed = True
+                finally:
+                    with self._knowledge_response_lock:
+                        self._knowledge_response = None
         except HTTPError as exc:
             message = self._decode_error(exc)
             raise ApiError(message) from exc
         except (URLError, OSError) as exc:
+            if self._knowledge_cancel_event.is_set():
+                return {"success": True, "cancelled": True, "data": data}
             raise ApiError("流式问答连接中断，请稍后重试") from exc
         except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as exc:
             raise ApiError("流式问答返回的数据格式错误") from exc
 
+        if self._knowledge_cancel_event.is_set():
+            return {"success": True, "cancelled": True, "data": data}
         if not completed:
             raise ApiError("流式问答未正常结束，请稍后重试")
         return {"success": True, "message": "ok", "data": data}
+
+    def cancel_knowledge_answer(self) -> None:
+        """关闭当前知识库流，让工作线程从阻塞读取中安全返回。"""
+        self._knowledge_cancel_event.set()
+        with self._knowledge_response_lock:
+            response = self._knowledge_response
+        if response is not None:
+            response.close()
 
     def delete_knowledge_document(self, document_id: int) -> dict:
         # 删除文档时后端通过外键级联删除对应文本块和向量。
@@ -194,6 +239,7 @@ class ApiClient:
         file_path: str,
         timeout: int = 10,
         content_type: str | None = None,
+        form_fields: dict[str, str] | None = None,
     ) -> dict:
         """构造单文件 multipart 请求并返回标准 JSON 结果。"""
         source_path = Path(file_path)
@@ -201,7 +247,15 @@ class ApiClient:
         file_type = content_type or mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
         # 清理文件名中的头部分隔字符，避免破坏 multipart 请求格式。
         safe_name = source_path.name.replace('"', "").replace("\r", "").replace("\n", "")
-        body = (
+        # 先写入普通表单字段，再写入文件字段，兼容 FastAPI 的 Form 参数。
+        form_body = b""
+        for name, value in (form_fields or {}).items():
+            form_body += (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+                f"{value}\r\n"
+            ).encode("utf-8")
+        body = form_body + (
             f"--{boundary}\r\n"
             f'Content-Disposition: form-data; name="file"; filename="{safe_name}"\r\n'
             f"Content-Type: {file_type}\r\n\r\n"
