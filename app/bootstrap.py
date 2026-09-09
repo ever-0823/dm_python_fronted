@@ -451,6 +451,14 @@ def load_stylesheet() -> str:
         border: 1px solid #e2e8f0;
         border-radius: 6px;
     }
+    /* OCR 图片任务表单独调整表头和单元格留白，避免右侧短列显得拥挤。 */
+    QTableWidget#OcrFilesTable QHeaderView::section {
+        padding: 9px 12px;
+        text-align: center;
+    }
+    QTableWidget#OcrFilesTable::item {
+        padding: 7px 10px;
+    }
     QLabel#AttachmentFile {
         background-color: #f8fafc;
         color: #344054;
@@ -709,6 +717,15 @@ def load_stylesheet() -> str:
         border: 1px solid #dfe6ee;
         border-radius: 6px;
         padding: 10px;
+        selection-background-color: #bfd4e8;
+    }
+    /* 表格 Markdown 预览沿用编辑区视觉，但保持只读展示。 */
+    QTextBrowser#TableMarkdownPreview {
+        background-color: #ffffff;
+        color: #202938;
+        border: 1px solid #dfe6ee;
+        border-radius: 6px;
+        padding: 12px;
         selection-background-color: #bfd4e8;
     }
     QTabWidget::pane {

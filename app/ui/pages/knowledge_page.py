@@ -1,13 +1,15 @@
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, QThread, QTimer, Signal, Slot
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog,
     QButtonGroup,
+    QDialog,
     QFrame,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
@@ -42,7 +44,7 @@ def _format_file_size(value: int) -> str:
 
 
 class KnowledgeDropZone(QFrame):
-    """知识文档拖拽区，只接受 PDF/TXT 文件。"""
+    """知识文档拖拽区，支持 Docling 可解析的常见文档格式。"""
 
     file_dropped = Signal(str)
     clicked = Signal()
@@ -63,7 +65,7 @@ class KnowledgeDropZone(QFrame):
         title.setObjectName("SectionTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
-        hint = QLabel("支持 PDF、TXT，单个文件最大 20 MB")
+        hint = QLabel("支持 PDF、DOCX、PPTX、XLSX、HTML、TXT，单个文件最大 20 MB")
         hint.setObjectName("PageHint")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(hint)
@@ -145,6 +147,7 @@ class KnowledgePageBase(QWidget):
         self.api_client = api_client
         self._thread: QThread | None = None
         self._worker: KnowledgeWorker | None = None
+        self._on_success = None
 
     def _start_worker(self, operation, *args, on_success=None) -> None:
         # 每个操作使用短生命周期线程，完成后释放线程和 worker，避免界面卡顿。
@@ -152,14 +155,23 @@ class KnowledgePageBase(QWidget):
         self._worker = KnowledgeWorker(operation, *args)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
-        if on_success:
-            self._worker.succeeded.connect(on_success)
+        # 统一经过页面对象的槽切回主线程，普通 lambda 不能直接修改 Qt 界面。
+        self._on_success = on_success
+        self._worker.succeeded.connect(self._operation_succeeded)
         self._worker.failed.connect(self._operation_failed)
         self._worker.completed.connect(self._thread.quit)
         self._worker.completed.connect(self._worker.deleteLater)
         self._thread.finished.connect(self._thread_finished)
         self._thread.finished.connect(self._thread.deleteLater)
         self._thread.start()
+
+    @Slot(dict)
+    def _operation_succeeded(self, response: dict) -> None:
+        """在 UI 主线程调用当前网络操作的成功回调。"""
+        on_success = self._on_success
+        self._on_success = None
+        if on_success:
+            on_success(response)
 
     @Slot(str)
     def _operation_failed(self, message: str) -> None:
@@ -171,6 +183,7 @@ class KnowledgePageBase(QWidget):
     def _thread_finished(self) -> None:
         self._thread = None
         self._worker = None
+        self._on_success = None
         self._set_busy(False)
         self._after_thread_finished()
 
@@ -198,7 +211,7 @@ class KnowledgeImportPage(KnowledgePageBase):
     """按照选择、设置、预览、确认四步完成知识文档导入。"""
 
     document_imported = Signal()
-    ALLOWED_SUFFIXES = {".pdf", ".txt"}
+    ALLOWED_SUFFIXES = {".pdf", ".docx", ".pptx", ".xlsx", ".html", ".htm", ".txt"}
     MAX_FILE_BYTES = 20 * 1024 * 1024
     STEP_TITLES = ("选择文件", "参数设置", "数据预览", "确认上传")
 
@@ -440,7 +453,12 @@ class KnowledgeImportPage(KnowledgePageBase):
         return label
 
     def select_file(self) -> None:
-        file_path, _ = QFileDialog.getOpenFileName(self, "选择知识文档", "", "知识文档 (*.pdf *.txt)")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择知识文档",
+            "",
+            "知识文档 (*.pdf *.docx *.pptx *.xlsx *.html *.htm *.txt)",
+        )
         if file_path:
             self.select_pending_file(file_path)
 
@@ -451,7 +469,7 @@ class KnowledgeImportPage(KnowledgePageBase):
         path = Path(file_path)
         try:
             if path.suffix.lower() not in self.ALLOWED_SUFFIXES:
-                raise ValueError("仅支持 PDF、TXT 文档")
+                raise ValueError("仅支持 PDF、DOCX、PPTX、XLSX、HTML、TXT 文档")
             size = path.stat().st_size
             if size <= 0:
                 raise ValueError("文档不能为空")
@@ -662,6 +680,7 @@ class KnowledgeDatasetPage(KnowledgePageBase):
         self.current_document: dict = {}
         self.chunk_page = 1
         self.chunk_pages = 1
+        self._pending_source_image: tuple[int, int] | None = None
         self._loaded = False
         self._build_ui()
 
@@ -763,15 +782,20 @@ class KnowledgeDatasetPage(KnowledgePageBase):
         self.detail_title.setObjectName("SectionTitle")
         header_row.addWidget(self.detail_title)
         header_row.addStretch()
+        self.source_image_button = QPushButton("查看原图")
+        self.source_image_button.setProperty("variant", "secondary")
+        self.source_image_button.setVisible(False)
+        self.source_image_button.clicked.connect(self.view_source_image)
+        header_row.addWidget(self.source_image_button)
         layout.addLayout(header_row)
 
         self.detail_meta_label = QLabel("")
         self.detail_meta_label.setObjectName("PageHint")
         layout.addWidget(self.detail_meta_label)
 
-        self.chunks_table = QTableWidget(0, 3)
+        self.chunks_table = QTableWidget(0, 4)
         self.chunks_table.setObjectName("KnowledgeChunksTable")
-        self.chunks_table.setHorizontalHeaderLabels(["文本块", "页码", "内容"])
+        self.chunks_table.setHorizontalHeaderLabels(["文本块", "页码/图片", "来源图片", "内容"])
         self.chunks_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.chunks_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         # 文本块详情仅用于阅读，不显示蓝色选中背景和文字焦点虚线。
@@ -782,9 +806,11 @@ class KnowledgeDatasetPage(KnowledgePageBase):
         chunks_header = self.chunks_table.horizontalHeader()
         chunks_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         chunks_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        chunks_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        chunks_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        chunks_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.chunks_table.setColumnWidth(0, 88)
-        self.chunks_table.setColumnWidth(1, 70)
+        self.chunks_table.setColumnWidth(1, 90)
+        self.chunks_table.setColumnWidth(2, 180)
         layout.addWidget(self.chunks_table, stretch=1)
 
         pagination = QHBoxLayout()
@@ -961,11 +987,13 @@ class KnowledgeDatasetPage(KnowledgePageBase):
             f"共 {total} 个文本块 · {_format_file_size(self.current_document.get('size_bytes', 0))} · "
             f"创建人：{self.current_document.get('created_by', '-')}"
         )
+        self.source_image_button.setVisible(self.current_document.get("source_type") in {"image", "image_set"})
         self.chunks_table.setRowCount(len(items))
         for row, chunk in enumerate(items):
             values = [
                 int(chunk.get("chunk_index", 0)) + 1,
                 chunk.get("page_number", "-"),
+                chunk.get("source_image_name") or "-",
                 chunk.get("content", ""),
             ]
             for column, value in enumerate(values):
@@ -980,6 +1008,72 @@ class KnowledgeDatasetPage(KnowledgePageBase):
         self.chunk_next_button.setEnabled(self.chunk_page < self.chunk_pages)
         self.status_label.setVisible(False)
         self.view_stack.setCurrentWidget(self.detail_page)
+
+    def view_source_image(self) -> None:
+        """读取当前知识库的图片列表，单图直接打开，多图先让用户选择。"""
+        if not self.current_document or self._thread is not None:
+            return
+        self._set_busy(True, "正在读取原图列表。")
+        self._start_worker(
+            self.api_client.get_knowledge_document_images,
+            int(self.current_document["id"]),
+            on_success=self._source_images_loaded,
+        )
+
+    @Slot(dict)
+    def _source_images_loaded(self, response: dict) -> None:
+        """选择需要查看的来源图片，并等待当前列表线程结束后下载。"""
+        images = (response.get("data") or {}).get("items") or []
+        if not images:
+            QMessageBox.warning(self, "原图不可用", "当前知识库没有可查看的原图。")
+            return
+        selected = images[0]
+        if len(images) > 1:
+            labels = [f"{image.get('image_index', index + 1)}. {image.get('original_name', '')}" for index, image in enumerate(images)]
+            label, accepted = QInputDialog.getItem(self, "选择原图", "来源图片", labels, 0, False)
+            if not accepted:
+                return
+            selected = images[labels.index(label)]
+        self._pending_source_image = (int(self.current_document["id"]), int(selected["id"]))
+
+    def _after_thread_finished(self) -> None:
+        """图片列表请求结束后，再启动选中原图的下载请求。"""
+        if self._pending_source_image is None:
+            return
+        document_id, image_id = self._pending_source_image
+        self._pending_source_image = None
+        QTimer.singleShot(0, lambda: self._load_source_image(document_id, image_id))
+
+    def _load_source_image(self, document_id: int, image_id: int) -> None:
+        """异步下载用户选中的一张来源图片。"""
+        if self._thread is not None:
+            return
+        self._set_busy(True, "正在读取原图。")
+        self._start_worker(
+            self.api_client.get_knowledge_document_image,
+            document_id,
+            image_id,
+            on_success=self._show_source_image,
+        )
+
+    @Slot(dict)
+    def _show_source_image(self, response: dict) -> None:
+        """在可滚动对话框中按比例展示知识来源原图。"""
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(response.get("content") or b""):
+            QMessageBox.warning(self, "原图不可用", "原图文件无法读取。")
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle(str(response.get("filename") or "知识来源原图"))
+        dialog.resize(900, 700)
+        layout = QVBoxLayout(dialog)
+        label = QLabel()
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setPixmap(
+            pixmap.scaled(860, 640, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        )
+        layout.addWidget(label)
+        dialog.exec()
 
     def previous_chunk_page(self) -> None:
         if self.chunk_page > 1:
@@ -1018,6 +1112,7 @@ class KnowledgeDatasetPage(KnowledgePageBase):
             self.detail_back_button,
             self.chunk_previous_button,
             self.chunk_next_button,
+            self.source_image_button,
         )
 
     def _format_created_at(self, value) -> str:
@@ -1208,7 +1303,10 @@ class KnowledgeSearchPage(KnowledgePageBase):
         if self._active_source_label is not None and sources:
             # 来源只展示文档、页码和相似度，避免把大段命中文本重复塞入聊天区。
             source_lines = [
-                f"{source.get('document', '未知文档')} · 第 {source.get('page', '-')} 页 · "
+                f"{'图片来源' if source.get('source_type') in {'image', 'image_set'} else '文档来源'}："
+                f"{source.get('document', '未知文档')}"
+                + (f" / {source.get('image')}" if source.get("image") else "")
+                + f" · 第 {source.get('page', '-')} 页 · "
                 f"{float(source.get('score', 0)) * 100:.1f}%"
                 for source in sources
             ]

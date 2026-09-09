@@ -112,7 +112,47 @@ class ApiClient:
 
     def recognize_image(self, file_path: str) -> dict:
         # OCR 接口接收单张图片，超时时间放宽以覆盖首次模型加载。
-        return self._upload_file("/ocr/ppocrv6", file_path, timeout=180)
+        return self._upload_file("/ocr/ppocrv6", file_path, timeout=600)
+
+    def parse_table_image(self, file_path: str) -> dict:
+        # 表格 JSON 识别复用同一套 PP-OCRv6 模型，并返回文字坐标和置信度。
+        return self._upload_file("/knowledge/table/parse", file_path, timeout=600)
+
+    def upload_knowledge_image(
+        self,
+        file_path: str,
+        knowledge_name: str,
+        corrected_text: str,
+        lines: list[dict],
+        document_id: int | None = None,
+    ) -> dict:
+        """新建图片知识库，或把原图追加到已有图片知识库。"""
+        form_fields = {
+            "knowledge_name": knowledge_name,
+            "corrected_text": corrected_text,
+            "lines_json": json.dumps(lines, ensure_ascii=False),
+        }
+        if document_id is not None:
+            # 追加模式只传稳定的数据库 ID，避免知识库重名时写错目标。
+            form_fields["document_id"] = str(document_id)
+        return self._upload_file(
+            "/knowledge/upload-image",
+            file_path,
+            timeout=1800,
+            form_fields=form_fields,
+        )
+
+    def get_knowledge_document_images(self, document_id: int) -> dict:
+        """读取图片知识库关联的全部图片摘要。"""
+        return self.request_json("GET", f"/knowledge/documents/{document_id}/images")
+
+    def get_knowledge_document_image(self, document_id: int, image_id: int) -> dict:
+        """下载图片知识库中的指定原图。"""
+        content, filename = self._request_bytes(
+            f"/knowledge/documents/{document_id}/images/{image_id}",
+            "knowledge-image",
+        )
+        return {"content": content, "filename": filename}
 
     def upload_knowledge_document(self, file_path: str, qa_split: bool = False) -> dict:
         # 知识文档上传复用现有 multipart 请求写法，模型处理时间较长所以放宽超时。
@@ -138,6 +178,14 @@ class ApiClient:
             "GET",
             f"/knowledge/documents/{document_id}/chunks?page={page}&page_size={page_size}",
         )
+
+    def get_knowledge_source_image(self, document_id: int) -> dict:
+        """下载图片知识的原图，供数据集详情页查看。"""
+        content, filename = self._request_bytes(
+            f"/knowledge/documents/{document_id}/source-image",
+            "knowledge-image",
+        )
+        return {"content": content, "filename": filename}
 
     def search_knowledge(self, query: str, top_k: int = 5) -> dict:
         # 首次加载 Qwen3 或 CPU 推理可能超过默认 10 秒，知识检索单独放宽超时。
